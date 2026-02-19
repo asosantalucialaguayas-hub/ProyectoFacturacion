@@ -1,0 +1,11 @@
+{
+	"folders": [
+		{
+			"path": "facturacion"
+		},
+		{
+			"path": "tax-service"
+		}
+	],
+	"settings": {}
+}
