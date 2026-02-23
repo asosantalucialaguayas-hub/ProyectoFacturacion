@@ -2,11 +2,11 @@ package com.tienda.facturacion.service;
 
 import com.tienda.facturacion.model.*;
 import com.tienda.facturacion.repository.*;
-import com.tienda.facturacion.dto.TaxResponse; 
+import com.tienda.facturacion.dto.TaxResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.web.client.RestTemplate; 
+import org.springframework.web.client.RestTemplate;
 
 import java.util.List;
 
@@ -17,7 +17,7 @@ public class FacturaService {
     @Autowired private ProductoRepository productoRepo;
     @Autowired private ClienteRepository clienteRepo;
     @Autowired private EmailService emailService;
-    @Autowired private RestTemplate restTemplate; 
+    @Autowired private RestTemplate restTemplate;
 
     public List<Factura> listarTodas() {
         return facturaRepo.findAll();
@@ -25,13 +25,16 @@ public class FacturaService {
 
     @Transactional
     public Factura procesarVentaECommerce(Factura facturaRequest) {
+
         Cliente cliente = clienteRepo.findById(facturaRequest.getCliente().getId())
                 .orElseThrow(() -> new RuntimeException("Error: El cliente no existe."));
 
         facturaRequest.setCliente(cliente);
-        double subtotalGlobal = 0; 
+
+        double subtotalGlobal = 0;
 
         for (DetalleFactura detalle : facturaRequest.getDetalles()) {
+
             Producto producto = productoRepo.findById(detalle.getProducto().getId())
                     .orElseThrow(() -> new RuntimeException("Producto no encontrado."));
 
@@ -45,26 +48,33 @@ public class FacturaService {
             detalle.setFactura(facturaRequest);
             detalle.setPrecioUnitario(producto.getPrecio());
             detalle.setSubtotal(producto.getPrecio() * detalle.getCantidad());
+
             subtotalGlobal += detalle.getSubtotal();
         }
 
-        String url = "http://tax-contenedor:8081/api/tax/calcular?subtotal=" + subtotalGlobal;
-        
+        // 🔥 CORRECCIÓN AQUÍ
+        String url = "http://tax_contened:8081/api/tax/calcular?subtotal=" + subtotalGlobal;
+
         try {
             System.out.println("Solicitando cálculo de IVA para subtotal: " + subtotalGlobal);
+
             TaxResponse taxResponse = restTemplate.getForObject(url, TaxResponse.class);
-            
+
             if (taxResponse != null) {
                 facturaRequest.setTotal(taxResponse.getTotal());
-                System.out.println("IVA recibido: " + taxResponse.getIva() + " | Total final: " + taxResponse.getTotal());
+                System.out.println("IVA recibido: " + taxResponse.getIva() +
+                        " | Total final: " + taxResponse.getTotal());
             }
+
         } catch (Exception e) {
             System.err.println("Error al contactar Tax-Service: " + e.getMessage());
-            facturaRequest.setTotal(subtotalGlobal); 
+
+            // fallback sin IVA
+            facturaRequest.setTotal(subtotalGlobal);
         }
 
         Factura facturaGuardada = facturaRepo.save(facturaRequest);
-        
+
         Factura facturaParaEmail = facturaRepo.findById(facturaGuardada.getId())
                 .orElseThrow(() -> new RuntimeException("Error al recuperar factura para email"));
 
@@ -74,7 +84,10 @@ public class FacturaService {
     }
 
     public TaxResponse simularImpuesto(Double subtotal) {
-        String url = "http://tax-contenedor:8081/api/tax/calcular?subtotal=" + subtotal;
+
+
+        String url = "http://tax_contened:8081/api/tax/calcular?subtotal=" + subtotal;
+
         try {
             return restTemplate.getForObject(url, TaxResponse.class);
         } catch (Exception e) {
