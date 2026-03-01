@@ -1,13 +1,12 @@
-name: Build and Push Docker Images
+name: CI/CD Pipeline - AKS
 
 on:
   push:
     branches: ["main"]
 
 jobs:
-  build-and-push:
+  build-and-deploy:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -22,8 +21,6 @@ jobs:
         run: |
           chmod +x facturacion/mvnw
           chmod +x tax-service/mvnw
-          chmod -R +r facturacion/.mvn || true
-          chmod -R +r tax-service/.mvn || true
 
       - name: Build JAR (facturacion)
         working-directory: facturacion
@@ -33,15 +30,52 @@ jobs:
         working-directory: tax-service
         run: ./mvnw clean package -DskipTests
 
-      - name: Docker login
-        run: echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+      - name: Docker Login
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build & Push image (facturacion)
-        run: |
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/facturacion:latest ./facturacion
-          docker push ${{ secrets.DOCKER_USERNAME }}/facturacion:latest
+      - name: Build & Push facturacion
+        uses: docker/build-push-action@v5
+        with:
+          context: ./facturacion
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/facturacion:latest
+            ${{ secrets.DOCKER_USERNAME }}/facturacion:${{ github.sha }}
 
-      - name: Build & Push image (tax-service)
+      - name: Build & Push tax-service
+        uses: docker/build-push-action@v5
+        with:
+          context: ./tax-service
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/tax-service:latest
+            ${{ secrets.DOCKER_USERNAME }}/tax-service:${{ github.sha }}
+
+      - name: Login en Azure
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Conectar a AKS
+        uses: azure/aks-set-context@v3
+        with:
+          resource-group: ${{ secrets.AKS_RESOURCE_GROUP }}
+          cluster-name: ${{ secrets.AKS_CLUSTER_NAME }}
+
+      - name: Deploy a Kubernetes
         run: |
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/tax-service:latest ./tax-service
-          docker push ${{ secrets.DOCKER_USERNAME }}/tax-service:latest
+          kubectl apply -f k8s/facturacion-deployment.yaml
+          kubectl apply -f k8s/tax-service-deployment.yaml
+          kubectl set image deployment/facturacion \
+            facturacion=${{ secrets.DOCKER_USERNAME }}/facturacion:${{ github.sha }}
+          kubectl set image deployment/tax-service \
+            tax-service=${{ secrets.DOCKER_USERNAME }}/tax-service:${{ github.sha }}
+
+      - name: Verificar despliegue
+        run: |
+          kubectl rollout status deployment/facturacion
+          kubectl rollout status deployment/tax-service
+          kubectl get services
